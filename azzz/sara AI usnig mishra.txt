@@ -1,0 +1,795 @@
+Step 1: Set Up Your Environment
+Install Python:
+
+Download and install Python 3.10 or later from python.org.
+
+During installation, check the box to Add Python to PATH.
+
+Install VS Code:
+
+Download and install Visual Studio Code.
+
+Install the Python extension in VS Code:
+
+Open VS Code, go to Extensions (Ctrl+Shift+X), and search for "Python" by Microsoft.
+
+Create a Project Folder:
+
+Open a terminal (Command Prompt or PowerShell) and run:
+
+bash
+Copy
+mkdir SaraVoiceAssistant
+cd SaraVoiceAssistant
+Open this folder in VS Code:
+
+bash
+Copy
+code .
+Set Up a Virtual Environment:
+
+In the terminal, create a virtual environment:
+
+bash
+Copy
+python -m venv venv
+Activate the virtual environment:
+
+On Windows:
+
+bash
+Copy
+venv\Scripts\activate
+On macOS/Linux:
+
+bash
+Copy
+source venv/bin/activate
+Install Required Libraries:
+
+Create a requirements.txt file in the project folder and add the following:
+
+Copy
+speechrecognition
+pyttsx3
+torch
+transformers
+pywhatkit
+customtkinter
+psutil
+beautifulsoup4
+requests
+Install the libraries:
+
+bash
+Copy
+pip install -r requirements.txt
+Step 2: Set Up Mistral 7B
+Install CUDA Toolkit:
+
+Since you have an RTX 2050 GPU, install the CUDA Toolkit for GPU acceleration:
+
+Download from NVIDIA CUDA Toolkit.
+
+Follow the installation instructions.
+
+Install PyTorch with CUDA Support:
+
+Install PyTorch with the following command:
+
+bash
+Copy
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+Download Mistral 7B:
+
+Mistral 7B is a large language model. We’ll use the Hugging Face transformers library to load it.
+
+Add the following code to a new file called model_interaction.py:
+
+python
+Copy
+# model_interaction.py
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
+# Load Mistral 7B with 4-bit quantization
+model_name = "mistralai/Mistral-7B-v0.1"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    device_map="auto",
+    load_in_4bit=True,
+    torch_dtype=torch.float16
+)
+
+def ask_mistral(prompt):
+    inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
+    outputs = model.generate(**inputs, max_length=100)
+    return tokenizer.decode(outputs[0], skip_special_tokens=True)
+Step 3: Write the Complete Code
+Below is the complete code for the Sara Voice Assistant project. Create the following files in your project folder:
+
+1. voice_assistant_sara.py (Main Script)
+python
+Copy
+# voice_assistant_sara.py
+from gui import VoiceAssistantGUI
+from voice_recognition import listen
+from conversation_manager import handle_query
+import threading
+import time
+
+# Flags for listening & GUI state
+listening = True
+gui = None
+
+# Start Assistant
+if __name__ == "__main__":
+    print("✅ Voice Assistant Started...")
+
+    # Start the listening thread
+    listening_thread = threading.Thread(target=listen, daemon=True)
+    listening_thread.start()
+
+    # Keep the main thread alive
+    while listening:
+        time.sleep(1)
+2. gui.py (GUI Code)
+python
+Copy
+# gui.py
+import customtkinter as ctk
+import time
+
+class VoiceAssistantGUI(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("Sara AI")
+        self.geometry("500x100")
+        self.resizable(False, False)
+        self.configure(fg_color="#2E3440")
+        self.attributes("-alpha", 0.95)
+        self.attributes("-topmost", True)
+
+        # Create a canvas for animations
+        self.canvas = ctk.CTkCanvas(self, bg="#2E3440", highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+
+        # Label for text
+        self.label = ctk.CTkLabel(self.canvas, text="Listening...", fg_color="#2E3440", text_color="#ECEFF4", font=("Arial", 20))
+        self.label.pack(pady=10, padx=20, fill="both", expand=True)
+
+        # Mic icon
+        self.mic_icon = ctk.CTkButton(self.canvas, text="🎤", fg_color="#5E81AC", width=50, height=50, state="disabled", font=("Arial", 24), corner_radius=25)
+        self.mic_icon.pack(side="bottom", pady=10)
+
+        # Settings icon
+        self.settings_icon = ctk.CTkButton(self.canvas, text="⚙️", fg_color="#5E81AC", width=30, height=30, font=("Arial", 14), corner_radius=15, command=self.open_settings)
+        self.settings_icon.place(relx=1.0, rely=0.0, anchor="ne", x=-10, y=10)
+
+        # Center the popup
+        self.center_popup()
+
+        # Start animations
+        self.animate_popup()
+
+    def center_popup(self):
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = 500
+        window_height = 100
+        x = (screen_width // 2) - (window_width // 2)
+        y = screen_height - window_height - 50
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+    def animate_popup(self):
+        self.attributes("-alpha", 0.0)
+        for i in range(10):
+            self.attributes("-alpha", i * 0.1)
+            self.update()
+            time.sleep(0.02)
+
+    def update_text(self, text):
+        if self.winfo_exists():
+            self.label.configure(text=text)
+
+    def open_settings(self):
+        from settings import prompt_password
+        prompt_password(self)
+3. voice_recognition.py (Speech Recognition and TTS)
+python
+Copy
+# voice_recognition.py
+import speech_recognition as sr
+import pyttsx3
+import queue
+import threading
+
+# Initialize TTS Engine
+engine = pyttsx3.init()
+
+# Queue for handling text-to-speech safely
+tts_queue = queue.Queue()
+
+def speak(text):
+    """Put the text into the queue for safe speech synthesis."""
+    tts_queue.put(text)
+
+def speech_worker():
+    """Thread worker to process speech synthesis requests."""
+    while True:
+        text = tts_queue.get()
+        if text is None:  # Exit signal
+            break
+        engine.say(text)
+        engine.runAndWait()
+        tts_queue.task_done()
+
+# Start speech worker thread
+speech_thread = threading.Thread(target=speech_worker, daemon=True)
+speech_thread.start()
+
+def listen():
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        recognizer.adjust_for_ambient_noise(source)
+        print("🎤 Microphone ready!")
+
+        while True:
+            try:
+                print("👂 Listening for command...")
+                audio = recognizer.listen(source)
+                command = recognizer.recognize_google(audio).lower()
+                print(f"🗣 Recognized: {command}")
+                return command
+            except sr.UnknownValueError:
+                print("Could not understand audio. Please try again.")
+            except sr.RequestError:
+                print("Speech Recognition service error. Please check your internet connection.")
+Step 4: Run the Project
+Open the terminal in VS Code and activate the virtual environment:
+
+bash
+Copy
+venv\Scripts\activate
+Run the main script:
+
+bash
+Copy
+python voice_assistant_sara.py
+Step 5: Test the Assistant
+Speak commands like:
+
+"What’s the time?"
+
+"Open Chrome."
+
+"Send Hello to John."
+
+Let me know if you need further assistance! 😊
+
+it is not having everything wt i have provided and asked for
+Got it! I’ll provide the complete code for the Sara Voice Assistant project, including all the functionalities you mentioned earlier (time queries, date queries, math calculations, app management, folder management, WhatsApp messaging, contacts, password system, Mistral 7B integration, etc.). I’ll also guide you step-by-step to set it up from scratch.
+
+Step 1: Project Structure
+Here’s the folder structure for the project:
+
+Copy
+SaraVoiceAssistant/
+│
+├── voice_assistant_sara.py       # Main script
+├── gui.py                        # GUI-related code
+├── voice_recognition.py          # Speech recognition and TTS
+├── model_interaction.py          # Mistral 7B model interaction
+├── google_search.py              # Google search functionality
+├── encript.py                    # Password hashing and verification
+├── app_management.py             # App and folder management
+├── conversation_manager.py       # Handles conversation flow and context
+├── settings.py                   # Settings and password management
+├── folder_paths.json             # Stores folder paths
+├── contacts.json                 # Stores WhatsApp contacts
+└── password.pkl                  # Stores hashed password
+Step 2: Complete Code
+1. voice_assistant_sara.py (Main Script)
+python
+Copy
+# voice_assistant_sara.py
+from gui import VoiceAssistantGUI
+from voice_recognition import listen
+from conversation_manager import handle_query
+import threading
+import time
+
+# Flags for listening & GUI state
+listening = True
+gui = None
+
+# Start Assistant
+if __name__ == "__main__":
+    print("✅ Voice Assistant Started...")
+
+    # Start the listening thread
+    listening_thread = threading.Thread(target=listen, daemon=True)
+    listening_thread.start()
+
+    # Keep the main thread alive
+    while listening:
+        time.sleep(1)
+2. gui.py (GUI Code)
+python
+Copy
+# gui.py
+import customtkinter as ctk
+import time
+
+class VoiceAssistantGUI(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("Sara AI")
+        self.geometry("500x100")
+        self.resizable(False, False)
+        self.configure(fg_color="#2E3440")
+        self.attributes("-alpha", 0.95)
+        self.attributes("-topmost", True)
+
+        # Create a canvas for animations
+        self.canvas = ctk.CTkCanvas(self, bg="#2E3440", highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+
+        # Label for text
+        self.label = ctk.CTkLabel(self.canvas, text="Listening...", fg_color="#2E3440", text_color="#ECEFF4", font=("Arial", 20))
+        self.label.pack(pady=10, padx=20, fill="both", expand=True)
+
+        # Mic icon
+        self.mic_icon = ctk.CTkButton(self.canvas, text="🎤", fg_color="#5E81AC", width=50, height=50, state="disabled", font=("Arial", 24), corner_radius=25)
+        self.mic_icon.pack(side="bottom", pady=10)
+
+        # Settings icon
+        self.settings_icon = ctk.CTkButton(self.canvas, text="⚙️", fg_color="#5E81AC", width=30, height=30, font=("Arial", 14), corner_radius=15, command=self.open_settings)
+        self.settings_icon.place(relx=1.0, rely=0.0, anchor="ne", x=-10, y=10)
+
+        # Center the popup
+        self.center_popup()
+
+        # Start animations
+        self.animate_popup()
+
+    def center_popup(self):
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        window_width = 500
+        window_height = 100
+        x = (screen_width // 2) - (window_width // 2)
+        y = screen_height - window_height - 50
+        self.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+    def animate_popup(self):
+        self.attributes("-alpha", 0.0)
+        for i in range(10):
+            self.attributes("-alpha", i * 0.1)
+            self.update()
+            time.sleep(0.02)
+
+    def update_text(self, text):
+        if self.winfo_exists():
+            self.label.configure(text=text)
+
+    def open_settings(self):
+        from settings import prompt_password
+        prompt_password(self)
+3. voice_recognition.py (Speech Recognition and TTS)
+python
+Copy
+# voice_recognition.py
+import speech_recognition as sr
+import pyttsx3
+import queue
+import threading
+
+# Initialize TTS Engine
+engine = pyttsx3.init()
+
+# Queue for handling text-to-speech safely
+tts_queue = queue.Queue()
+
+def speak(text):
+    """Put the text into the queue for safe speech synthesis."""
+    tts_queue.put(text)
+
+def speech_worker():
+    """Thread worker to process speech synthesis requests."""
+    while True:
+        text = tts_queue.get()
+        if text is None:  # Exit signal
+            break
+        engine.say(text)
+        engine.runAndWait()
+        tts_queue.task_done()
+
+# Start speech worker thread
+speech_thread = threading.Thread(target=speech_worker, daemon=True)
+speech_thread.start()
+
+def listen():
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        recognizer.adjust_for_ambient_noise(source)
+        print("🎤 Microphone ready!")
+
+        while True:
+            try:
+                print("👂 Listening for command...")
+                audio = recognizer.listen(source)
+                command = recognizer.recognize_google(audio).lower()
+                print(f"🗣 Recognized: {command}")
+                return command
+            except sr.UnknownValueError:
+                print("Could not understand audio. Please try again.")
+            except sr.RequestError:
+                print("Speech Recognition service error. Please check your internet connection.")
+4. model_interaction.py (Mistral 7B Integration)
+python
+Copy
+# model_interaction.py
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
+# Load Mistral 7B with 4-bit quantization
+model_name = "mistralai/Mistral-7B-v0.1"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    device_map="auto",
+    load_in_4bit=True,
+    torch_dtype=torch.float16
+)
+
+def ask_mistral(prompt):
+    inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
+    outputs = model.generate(**inputs, max_length=100)
+    return tokenizer.decode(outputs[0], skip_special_tokens=True)
+5. google_search.py (Google Search Functionality)
+python
+Copy
+# google_search.py
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
+
+def search_google(query):
+    try:
+        # Handle specific queries like "today's date" or "current time" locally
+        query_lower = query.lower()
+        if "today's date" in query_lower or "current date" in query_lower:
+            today = datetime.now().strftime("%A, %B %d, %Y")
+            return f"Today's date is {today}."
+        if "time" in query_lower and ("what is" in query_lower or "tell me" in query_lower or "current" in query_lower):
+            current_time = datetime.now().strftime("%I:%M %p")
+            return f"The current time is {current_time}."
+
+        # Perform a Google search for other queries
+        url = f"https://www.google.com/search?q={query}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3"
+        }
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+
+        # Parse the HTML response
+        soup = BeautifulSoup(response.text, "html.parser")
+        result_div = soup.find("div", class_="BNeawe")
+        if result_div:
+            result = result_div.text.strip()
+        else:
+            result = "no results found"
+
+        return result
+    except requests.exceptions.RequestException as e:
+        return "error: unable to access google"
+    except Exception as e:
+        return f"error: {str(e)}"
+6. encript.py (Password Hashing and Verification)
+python
+Copy
+# encript.py
+import hashlib
+import pickle
+import os
+
+PASSWORD_FILE = "password.pkl"
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def check_password(password):
+    if not os.path.exists(PASSWORD_FILE):
+        return False
+    with open(PASSWORD_FILE, "rb") as f:
+        hashed = pickle.load(f)
+    return hashed == hash_password(password)
+
+def set_password(password):
+    with open(PASSWORD_FILE, "wb") as f:
+        pickle.dump(hash_password(password), f)
+7. app_management.py (App and Folder Management)
+python
+Copy
+# app_management.py
+import os
+import subprocess
+import json
+import pywhatkit as kit
+
+# File to store folder paths
+FOLDER_PATHS_FILE = "folder_paths.json"
+
+# Load saved folder paths
+if os.path.exists(FOLDER_PATHS_FILE):
+    with open(FOLDER_PATHS_FILE, "r") as f:
+        FOLDER_PATHS = json.load(f)
+else:
+    FOLDER_PATHS = {}
+
+# File to store contacts
+CONTACTS_FILE = "contacts.json"
+
+# Load saved contacts
+if os.path.exists(CONTACTS_FILE):
+    with open(CONTACTS_FILE, "r") as f:
+        CONTACTS = json.load(f)
+else:
+    CONTACTS = {}
+
+# App paths
+APP_PATHS = {
+    "chrome": r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    "notepad": "notepad.exe",
+    "calculator": "calc.exe",
+    "steam": r"D:\steam\steam.exe",
+}
+
+def create_folder(folder_name, base_path=None):
+    """Create a folder and save its path."""
+    if not base_path:
+        base_path = os.path.expanduser("~")  # Default to user's home directory
+    
+    folder_path = os.path.join(base_path, folder_name)
+    
+    try:
+        os.makedirs(folder_path, exist_ok=True)
+        FOLDER_PATHS[folder_name.lower()] = folder_path
+        
+        # Save the updated folder paths to the file
+        with open(FOLDER_PATHS_FILE, "w") as f:
+            json.dump(FOLDER_PATHS, f)
+        
+        return f"Folder '{folder_name}' created successfully at {folder_path}."
+    except Exception as e:
+        return f"Error creating folder: {e}"
+
+def open_folder(folder_name):
+    """Open a folder using its saved path."""
+    folder_name = folder_name.lower()
+    if folder_name in FOLDER_PATHS:
+        try:
+            subprocess.Popen(f'explorer "{FOLDER_PATHS[folder_name]}"')
+            return f"Opening folder '{folder_name}'."
+        except Exception as e:
+            return f"Error opening folder: {e}"
+    else:
+        return f"Folder '{folder_name}' not found."
+
+def close_folder(command):
+    """Close all folders by restarting File Explorer."""
+    if "close" in command:
+        try:
+            subprocess.run("taskkill /IM explorer.exe /F", shell=True)
+            time.sleep(1)
+            subprocess.run("start explorer.exe", shell=True)
+            return "All folders closed."
+        except Exception as e:
+            return f"Error closing folders: {e}"
+
+def open_application(app_name):
+    """Open an application."""
+    app_name = app_name.lower()
+    if app_name in APP_PATHS:
+        try:
+            os.startfile(APP_PATHS[app_name])
+            return f"Opening {app_name.capitalize()}."
+        except Exception as e:
+            return f"Error opening {app_name}: {e}"
+    else:
+        return f"Application '{app_name}' not found."
+
+def close_application(app_name):
+    """Close an application."""
+    app_name = app_name.lower()
+    for process in psutil.process_iter(attrs=['pid', 'name']):
+        if app_name in process.info['name'].lower():
+            try:
+                os.kill(process.info['pid'], 9)
+                return f"Closing {app_name.capitalize()}."
+            except Exception as e:
+                return f"Error closing {app_name}: {e}"
+    return f"{app_name.capitalize()} is not running."
+
+def send_whatsapp_message(name, message):
+    """Send a WhatsApp message to a contact."""
+    name = name.lower()
+    if name in CONTACTS:
+        phone_number = CONTACTS[name]
+        try:
+            kit.sendwhatmsg_instantly(phone_number, message)
+            return f"Message sent to {name}."
+        except Exception as e:
+            return f"Error sending message: {e}"
+    else:
+        return f"Contact '{name}' not found."
+
+def add_contact(name, phone_number):
+    """Add a new contact to the contacts list."""
+    CONTACTS[name.lower()] = phone_number
+    with open(CONTACTS_FILE, "w") as f:
+        json.dump(CONTACTS, f)
+    return f"Contact '{name}' added successfully."
+
+def list_contacts():
+    """List all saved contacts."""
+    if CONTACTS:
+        return "Saved contacts: " + ", ".join(CONTACTS.keys())
+    else:
+        return "No contacts found."
+8. conversation_manager.py (Conversation Flow and Context)
+python
+Copy
+# conversation_manager.py
+import re
+from datetime import datetime
+from app_management import send_whatsapp_message, add_contact, list_contacts, create_folder, open_folder, close_application, close_folder
+from model_interaction import ask_mistral
+from google_search import search_google
+
+# Conversation context
+conversation_context = {}
+
+def handle_query(command):
+    global conversation_context
+
+    # Convert command to lowercase for easier matching
+    command = command.lower()
+
+    # Time queries
+    if re.search(r"\b(time|current time|what time is it|tell me the time)\b", command):
+        current_time = datetime.now().strftime("%I:%M %p")
+        return f"The current time is {current_time}."
+
+    # Date queries
+    if re.search(r"\b(date|today's date|current date|what's today's date)\b", command):
+        today = datetime.now().strftime("%A, %B %d, %Y")
+        return f"Today's date is {today}."
+
+    # Math calculations
+    math_match = re.search(r"\b(what is|calculate|what's)\b (\d+ [\+\-\*/] \d+)", command)
+    if math_match:
+        expression = math_match.group(2)
+        try:
+            result = eval(expression)
+            return f"The answer is {result}."
+        except:
+            return "I couldn't solve that math problem."
+
+    # Open applications
+    app_match = re.search(r"\b(open|start)\b (\w+)", command)
+    if app_match:
+        app_name = app_match.group(2)
+        return open_application(app_name)
+
+    # Open folders
+    folder_match = re.search(r"\b(open)\b (\w+ folder)", command)
+    if folder_match:
+        folder_name = folder_match.group(2).replace(" folder", "")
+        return open_folder(folder_name)
+
+    # Create folders
+    create_match = re.search(r"\b(create|make)\b (\w+ folder)", command)
+    if create_match:
+        folder_name = create_match.group(2).replace(" folder", "")
+        return create_folder(folder_name)
+
+    # Send WhatsApp messages
+    send_match = re.search(r"\b(send|text)\b (.+) to (\w+)", command)
+    if send_match:
+        message = send_match.group(2)
+        name = send_match.group(3)
+        return send_whatsapp_message(name, message)
+
+    # Add contacts
+    add_match = re.search(r"\b(add contact)\b (\w+) with number (\+\d+)", command)
+    if add_match:
+        name = add_match.group(2)
+        phone_number = add_match.group(3)
+        return add_contact(name, phone_number)
+
+    # List contacts
+    if re.search(r"\b(list contacts|show contacts)\b", command):
+        return list_contacts()
+
+    # Close applications
+    close_app_match = re.search(r"\b(close|exit)\b (\w+)", command)
+    if close_app_match:
+        app_name = close_app_match.group(2)
+        return close_application(app_name)
+
+    # Close folders
+    if re.search(r"\b(close all folders)\b", command):
+        return close_folder(command)
+
+    # Greetings
+    if re.search(r"\b(hello|hi|hey)\b", command):
+        return "Hello! How can I help you today?"
+
+    # Thank you
+    if re.search(r"\b(thank you|thanks)\b", command):
+        return "You're welcome! Let me know if you need anything else."
+
+    # Fallback to Mistral 7B for other queries
+    return ask_mistral(command)
+9. settings.py (Settings and Password Management)
+python
+Copy
+# settings.py
+import customtkinter as ctk
+from encript import hash_password, check_password, set_password
+from voice_recognition import speak
+
+def prompt_password(parent):
+    password = ctk.CTkInputDialog(text="Enter your password:", title="Password Required").get_input()
+    if check_password(password):
+        show_settings_menu(parent)
+    else:
+        speak("Incorrect password.")
+
+def show_settings_menu(parent):
+    settings_menu = ctk.CTkToplevel(parent)
+    settings_menu.title("Settings")
+    settings_menu.geometry("300x200")
+
+    change_password_btn = ctk.CTkButton(settings_menu, text="Change Password", command=lambda: change_password(parent))
+    change_password_btn.pack(pady=10)
+
+    change_voice_btn = ctk.CTkButton(settings_menu, text="Change Voice", command=change_voice)
+    change_voice_btn.pack(pady=10)
+
+def change_password(parent):
+    new_password = ctk.CTkInputDialog(text="Enter new password:", title="Change Password").get_input()
+    if new_password:
+        set_password(new_password)
+        speak("Password changed successfully.")
+
+def change_voice():
+    speak("Please say the following lines for voice training:")
+    lines = ["Hello Sara", "Hi Sara", "Hey Sara"]
+    for line in lines:
+        speak(line)
+        time.sleep(2)
+Step 3: Run the Project
+Open the terminal in VS Code and activate the virtual environment:
+
+bash
+Copy
+venv\Scripts\activate
+Run the main script:
+
+bash
+Copy
+python voice_assistant_sara.py
+Step 4: Test the Assistant
+Speak commands like:
+
+"What’s the time?"
+
+"Open Chrome."
+
+"Send Hello to John."
+
